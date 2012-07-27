@@ -15,24 +15,19 @@ def from_access(str)
   IBM_2_UTF_CONVERTER.convert str
 end
 
-mdb_filename = ARGV.shift
-
-filename = 'Z:\\Sites\\Apps\\Nagruzka-2-RASSPASS\\test.mdb'
-
-DB = Sequel.ado(
-  :conn_string =>
-      "Provider=Microsoft.Jet.OLEDB.4.0;Data Source=#{filename}"
+RASSPASS = Sequel.ado(
+  conn_string: "Provider=Microsoft.Jet.OLEDB.4.0;Data Source=#{ARGV.shift}"
 )
 
-DB['Доставка'].select('Метод доставки').each do |i|
-  i.each_key do |key|
-    puts from_access(key.to_s)
-    puts key.encoding
-    puts from_access(key.to_s) == 'КодМетодаДоставки'
-#    Encoding.name_list do |encoding_name|
-#      puts encoding_name.class
-#      converter = Encoding::Converter.new encoding_name, "UTF-8"
-#      puts converter.convert key
-#    end
-  end
+# puts RASSPASS[:Доставка].insert(:МетодДоставки => 'Привет') #.to_csv
+# puts "!!!\n\n"
+
+RASSPASS[:Доставка].each do |i|
+  puts i.keys
+  puts i[i.keys[1]]
+#  i.each_value do |key|
+#    puts from_access(key.to_s)
+#    puts key.encoding
+#    puts from_access(key.to_s) == 'МетодДоставки'
+#  end
 end
