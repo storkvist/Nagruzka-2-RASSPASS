@@ -325,6 +325,7 @@ foreach ($SPECS as $form => $spec) {
  * Находим несовпадения в часах между группами.
  */
 $fuckedPlan = array();
+$RESPECS = array();
 foreach ($SPECS as $form => $spec) {
     foreach ($spec as $specName => $course) {
         foreach ($course as $courseNumber => $group) {
@@ -422,7 +423,7 @@ foreach ($SPECS as $form => $spec) {
                 }
             }
 
-            $SPECS[$specName][$courseNumber] = $reFlow;
+            $SPECS[$form][$specName][$courseNumber] = $reFlow;
         }
     }
 }
@@ -457,18 +458,79 @@ $RASSPASS = 'C:\\2012_2013 1\\Raspis1.mdb';
  * @var ADOConnection $rasspass
  */
 $rasspass = ADONewConnection('access');
-$rasspass->debug = true;
+//$rasspass->debug = true;
 $rasspass->SetFetchMode(ADODB_FETCH_ASSOC);
 $dsn = "Driver={Microsoft Access Driver (*.mdb)};Dbq={$RASSPASS};Uid=Admin;";
 $rasspass->Connect($dsn);
+//$rasspass->debug = true;
+
+$rasspass->Execute(u2w('DELETE * FROM Планы'));
+$rasspass->Execute(u2w('DELETE * FROM Дисциплины'));
+$rasspass->Execute(u2w('DELETE * FROM Потоки'));
+$rasspass->Execute(u2w('DELETE * FROM Специальности'));
+$rasspass->Execute(u2w('DELETE * FROM Кафедры'));
+
 
 /**
  * Коды кафедр.
  */
+$_NAGRUZKA_DEPARTMENTS = array(
+    1   => 'Физ',
+    2   => 'Хим',
+    3   => 'Мат',
+    4   => 'ТДП',
+    5   => 'ТПиПП',
+    6   => 'ТиТЦП',
+    7   => 'ИТиУ',
+    8   => 'ПиПО',
+    9   => 'АПП',
+    10   => 'МСиТ',
+    11   => 'ИС',
+    12   => 'ИиВТ',
+    13   => 'НГ',
+    14   => 'ВМ',
+    15   => 'Англ',
+    16   => 'ФУиА',
+    17   => 'УБП',
+    18   => 'Мндж',
+    19   => 'ПМиМС',
+    20   => 'ФВС',
+    21   => 'ЭиИ',
+    22   => 'ИДиР',
+    23   => 'КБ',
+    24   => 'КиПК',
+    25   => 'ИЛ',
+    26   => 'РЯиС',
+    27   => 'ПП',
+    28   => 'МКиП',
+    29   => 'РМ',
+    30   => 'УРБ',
+    31   => 'СсО',
+    33   => 'Ист',
+    35   => 'ИллЭст',
+    36   => 'РиЖ',
+    37   => 'ХТОПП',
+    38   => 'Фил',
+    39   => 'ПиС',
+    40   => 'ИКАБТ',
+);
+foreach ($_NAGRUZKA_DEPARTMENTS as $departmentName) {
+    $rasspass->Execute(u2w("INSERT INTO Кафедры (Кафедра) VALUES ('{$departmentName}');"));
+}
+
 $_DEPARTMENTS = array();
 $rows = $rasspass->Execute(u2w('SELECT КодКафедры, Кафедра FROM Кафедры'));
 foreach ($rows->GetRows() as $row) {
-    $_DEPARTMENTS[w2u($row[u2w('Кафедра')])] = $row[u2w('КодКафедры')];
+    $_DEPARTMENTS[w2u($row[u2w('Кафедра')])] = intval($row[u2w('КодКафедры')]);
+}
+
+/**
+ * Заносим дисицплины в РАСПАСС.
+ */
+foreach ($uniqueSubjects as $subject) {
+    $rasspass->Execute(
+        u2w("INSERT INTO Дисциплины (Дисциплина) VALUES ('{$subject}')")
+    );
 }
 
 /**
@@ -481,20 +543,8 @@ foreach ($rows->GetRows() as $row) {
 }
 
 /**
- * Заносим дисицплины в РАСПАСС.
- */
-$rasspass->Execute(u2w('DELETE FROM Дисциплины'));
-foreach ($uniqueSubjects as $subject) {
-    $rasspass->Execute(
-        u2w("INSERT INTO Дисциплины (Дисциплина) VALUES ('{$subject}')")
-    );
-}
-
-/**
  * Заполняем таблицы Специальности и Потоки.
  */
-$rasspass->Execute(u2w('DELETE FROM Специальности'));
-$rasspass->Execute(u2w('DELETE FROM Потоки'));
 foreach ($FLOWS as $form => $spec) {
     foreach ($spec as $specName => $groups) {
         $rasspass->Execute(
@@ -537,6 +587,44 @@ foreach ($rows->GetRows() as $row) {
             intval(w2u($row[u2w('Курс')]))
                 => intval(w2u($row[u2w('КодПотока')]))
         );
+    }
+}
+
+$rasspass->Disconnect();
+$rasspass->Connect($dsn);
+
+/**
+ * Заполняем таблицу с планами.
+ */
+//$rasspass->debug = true;
+foreach ($SPECS as $form => $flow) {
+    foreach ($flow as $specName => $courses) {
+        foreach ($courses as $courseNumber => $departments) {
+            foreach ($departments as $departmentNumber => $subjects) {
+                foreach ($subjects as $subjectName => $rows) {
+                    if ('' == $_DEPARTMENTS[$_NAGRUZKA_DEPARTMENTS[intval($departmentNumber)]]) {
+                        var_dump($rows);
+                        echo '<hr>';
+                    }
+
+                    if ('' == $_SUBJECTS[$subjectName]) {
+                        var_dump($rows);
+                        echo '<hr>';
+                    }
+
+
+                    $query = <<<EOT
+INSERT INTO Планы (КодПотока, КодКафедры, Дисциплины_Код,
+                   Лекций, Семинаров, Лабораторных)
+VALUES ({$_FLOWS[$form][$specName][$courseNumber]},
+        {$_DEPARTMENTS[$_NAGRUZKA_DEPARTMENTS[intval($departmentNumber)]]},
+        {$_SUBJECTS[$subjectName]}, {$rows['baseHours']['lecHour']},
+        {$rows['baseHours']['praHour']}, {$rows['baseHours']['labHour']});
+EOT;
+                    $rasspass->Execute(u2w($query));
+                }
+            }
+        }
     }
 }
 
