@@ -4,6 +4,8 @@ date_default_timezone_set('Europe/Moscow');
 
 include 'tcpdf/tcpdf.php';
 include 'adodb517/adodb.inc.php';
+require_once 'phprtflite/lib/PHPRtfLite.php';
+PHPRtfLite::registerAutoloader();
 
 /**
  * Загрузка данных из CSV файла с табуляцией в качестве разделителя.
@@ -88,6 +90,7 @@ function w2u($text) {
  */
 if (mb_strstr($_SERVER['PATH'], 'C:\WINDOWS')) {
     $envPath = 'Z:\Sites\Apps\NAGRUZKA-2-RASSPASS\\';
+    $slash = '\\';
     header('Content-Type: text/html; charset=utf-8');
     $data = array_merge(
         loadCsvData('Z:\Sites\Apps\NAGRUZKA-2-RASSPASS\nagruzkaUTF8.txt'),
@@ -95,6 +98,7 @@ if (mb_strstr($_SERVER['PATH'], 'C:\WINDOWS')) {
     );
 } else {
     $envPath = '';
+    $slash = '/';
     $data = array_merge(
         loadCsvData('nagruzkaUTF8.txt'),
         loadCsvData('nagruzkaVUTF8.txt')
@@ -126,6 +130,32 @@ foreach ($data as $row) {
     $uniqueSubjects[] = $subject;
 }
 $uniqueSubjects = array_unique($uniqueSubjects);
+
+/*$uniqueTeachers = array();
+foreach ($data as $row) {
+    $department = intval($row[11]);
+    if (!isset($uniqueTeachers[$department])) {
+        $uniqueTeachers[$department] = array();
+    }
+
+    $teacher = $row[7];
+    if (in_array($teacher, array('', 'почасовой фонд', 'Го+Мж+Ши',
+        'Решетникова, Артюшина', 'преп.2', 'Андреев, Карташева',
+        'почасовой фонд шСретенцева Т.Е.', 'вакансия', 'ассистент?',
+        'почасовой фонд- шПрусакова Т.Е.', 'преп.1'))
+    ) {
+        continue;
+    }
+
+    if ('ш' !== mb_substr($teacher, 0, 2)
+        && 'i' !== mb_substr($teacher, 0, 1)
+        && 'e' !== mb_substr($teacher, 0, 1)
+    ) {
+        var_dump($teacher);
+    }
+
+    $uniqueTeachers[$department] = $teacher;
+}*/
 
 $uniqueSpecs = array();
 $sport = array();
@@ -327,8 +357,20 @@ foreach ($SPECS as $form => $spec) {
 $fuckedPlan = array();
 $RESPECS = array();
 foreach ($SPECS as $form => $spec) {
+    if (!isset($RESPECS[$form])) {
+        $RESPECS[$form] = array();
+    }
+
     foreach ($spec as $specName => $course) {
+        if (!isset($RESPECS[$form][$specName])) {
+            $RESPECS[$form][$specName] = array();
+        }
+
         foreach ($course as $courseNumber => $group) {
+            if (!isset($RESPECS[$form][$specName][$courseNumber])) {
+                $RESPECS[$form][$specName][$courseNumber] = array();
+            }
+
             $flow = array();
             foreach ($group as $groupNumber => $groups) {
                 if (!isset($flow[$groupNumber])) {
@@ -424,9 +466,89 @@ foreach ($SPECS as $form => $spec) {
             }
 
             $SPECS[$form][$specName][$courseNumber] = $reFlow;
+
+            foreach ($reFlow as $department => $subjects) {
+                if (!isset($RESPECS[$form][$specName][$courseNumber][$department])) {
+                    $RESPECS[$form][$specName][$courseNumber][$department] = array();
+                }
+
+                foreach ($subjects as $subjectName => $groups) {
+                    if (!isset($RESPECS[$form][$specName][$courseNumber][$department][$subjectName])) {
+                        $RESPECS[$form][$specName][$courseNumber][$department][$subjectName] = array();
+                    }
+
+                    $regroups = array(
+                        0 => array()
+                    );
+                    unset($groups['baseHours']);
+                    $groupsCount = count($groups);
+                    for ($i = 1; $i <= $groupsCount; $i++) {
+                        $regroups[$i] = array(
+                            0 => array()
+                        );
+                    }
+
+                    $subjectUnion = array();
+                    foreach ($groups as $groupNumber => $cycles) {
+                        foreach ($cycles as $row) {
+                            if (mb_strstr($row[0], 'п/г')) {
+                                /**
+                                 * Этот цикл нужно выносить в отдельную подгруппу.
+                                 */
+                                $subgroup = intval(
+                                    mb_substr(mb_strstr($row[0], 'п/г'), 6, 1)
+                                );
+                                $regroups[$groupNumber][$subgroup][] = $row;
+/*                                if (isset($regroups[$groupNumber][$subgroup])) {
+                                    $regroups[$groupNumber][$subgroup][] = $row;
+                                } else {
+                                    $regroups[$groupNumber] = array(
+                                        $subgroup => array($row)
+                                    );
+                                }*/
+                            } elseif (
+                                '' === $row[8] && '' === $row[9]
+                            ) {
+                                /**
+                                 * Этот предмет изучается отдельной группой,
+                                 * потому что у него ни с чем нет объединения.
+                                 */
+                                $regroups[$groupNumber][0][] = $row;
+                            } else {
+                                $union = intval($row[8]);
+                                if (isset($subjectUnion[$union])) {
+                                    $subjectUnion[$union][$groupNumber] = $row;
+                                } else {
+                                    $subjectUnion[$union] = array(
+                                        $groupNumber => $row
+                                    );
+                                }
+                            }
+                        }
+                    }
+
+                    foreach ($subjectUnion as $unionNumber => $unionRows) {
+                        if (count($unionRows) === $groupsCount) {
+                            /**
+                             * Этот предмет две группы изучают вместе — выносим
+                             * его в общий цикл.
+                             */
+                            $regroups[0][] = $unionRows;
+                        } else {
+                            foreach ($unionRows as $gN => $rW) {
+                                $regroups[$gN][0][] = $rW;
+                            }
+                        }
+                    }
+
+                    $RESPECS[$form][$specName][$courseNumber][$department][$subjectName] = $regroups;
+               }
+            }
         }
     }
 }
+//var_dump($RESPECS);
+//die();
 
 /**
  * На этом этапе структура $SPECS такова:
@@ -464,6 +586,7 @@ $dsn = "Driver={Microsoft Access Driver (*.mdb)};Dbq={$RASSPASS};Uid=Admin;";
 $rasspass->Connect($dsn);
 //$rasspass->debug = true;
 
+$rasspass->Execute(u2w('DELETE * FROM Циклы'));
 $rasspass->Execute(u2w('DELETE * FROM Планы'));
 $rasspass->Execute(u2w('DELETE * FROM Дисциплины'));
 $rasspass->Execute(u2w('DELETE * FROM Потоки'));
@@ -597,10 +720,27 @@ $rasspass->Connect($dsn);
  * Заполняем таблицу с планами.
  */
 //$rasspass->debug = true;
+$PLANS_ID = array();
 foreach ($SPECS as $form => $flow) {
+    if (!isset($PLANS_ID[$form])) {
+        $PLANS_ID[$form] = array();
+    }
+
     foreach ($flow as $specName => $courses) {
+        if (!isset($PLANS_ID[$form][$specName])) {
+            $PLANS_ID[$form][$specName] = array();
+        }
+
         foreach ($courses as $courseNumber => $departments) {
+            if (!isset($PLANS_ID[$form][$specName][$courseNumber])) {
+                $PLANS_ID[$form][$specName][$courseNumber] = array();
+            }
+
             foreach ($departments as $departmentNumber => $subjects) {
+                if (!isset($PLANS_ID[$form][$specName][$courseNumber][$departmentNumber])) {
+                    $PLANS_ID[$form][$specName][$courseNumber][$departmentNumber] = array();
+                }
+
                 foreach ($subjects as $subjectName => $rows) {
                     if ('' == $_DEPARTMENTS[$_NAGRUZKA_DEPARTMENTS[intval($departmentNumber)]]) {
                         var_dump($rows);
@@ -622,11 +762,217 @@ VALUES ({$_FLOWS[$form][$specName][$courseNumber]},
         {$rows['baseHours']['praHour']}, {$rows['baseHours']['labHour']});
 EOT;
                     $rasspass->Execute(u2w($query));
+
+                    $result = $rasspass->Execute(u2w(
+                        'SELECT КодКурса FROM Планы ORDER BY КодКурса DESC'
+                    ))->GetRows();
+
+                    $PLANS_ID[$form][$specName][$courseNumber][$departmentNumber][$subjectName] = intval($result[0][u2w('КодКурса')]);
                 }
             }
         }
     }
 }
+
+/**
+ * Определяем идентификатор типа аудитории "лекц_п".
+ */
+$lecAud = $rasspass->Execute(u2w("SELECT КодТипАуд FROM ТипыАудиторий WHERE ТипАуд = 'лекц_п';"))->GetRows();
+$lecAud = intval($lecAud[0][u2w('КодТипАуд')]);
+
+/**
+ * Печатаем карты дисциплин по потокам.
+ */
+class PdfWithNumbers extends TCPDF {
+    public function Footer() {
+        $this->SetY(-15);
+        $this->SetFont('pts55f', 'I', 8);
+        $this->Cell(0, 10, $this->getAliasNumPage() . '/' . $this->getAliasNbPages(), 0, false, 'C', 0, '', 0, false, 'T', 'M');
+    }
+}
+$specsPdf = new PdfWithNumbers();
+$specsPdf->addTTFfont($envPath . 'PTSans/PTS55F.ttf');
+$specsPdf->addTTFfont($envPath . 'PTSans/PTS75F.ttf');
+$specsPdf->addTTFfont($envPath . 'PTSans/PTC55F.ttf');
+$specsPdf->SetFont('pts55f', '', 10, true, false);
+$specsPdf->setPageOrientation('Portrait');
+$specsPdf->setPrintHeader(false);
+//$specsPdf->setPrintFooter(false);
+
+//$RESPECS[$form][$specName][$courseNumber][$department][$subjectName][] = $regroups;
+
+//var_dump($RESPECS);die();
+
+$uniqueHours = array();
+
+foreach ($RESPECS as $formName => $arr1) {
+    foreach ($arr1 as $specName => $arr2) {
+        foreach ($arr2 as $courseNumber => $arr3) {
+            $xhtml = "<h1>Поток {$formName}{$specName}-{$courseNumber}</h1>";
+            $xhtml .= <<<EOT
+<table border="1" cellpadding="3">
+    <tr>
+        <td width="45">Кафедра</td>
+        <td width="240">Дисциплина</td>
+        <td width="45">Группа</td>
+        <td width="30">Пг</td>
+        <td width="25">Тип</td>
+        <td width="30">Часы</td>
+        <td width="115">Преподаватель</td>
+    </tr>
+EOT;
+            $zebra = false;
+            foreach ($arr3 as $departmentNumber => $subjects) {
+                $departmentPrinted = false;
+                foreach ($subjects as $subjectName => $cycles) {
+/*                    if (mb_strstr($subjectName, 'Техника печатной графики (офорт, гравюра, литография')) {
+                        var_dump($cycles);die();
+                    }*/
+
+                    $subjectPrinted = false;
+                    foreach ($cycles as $cycleGroup => $subgroups) {
+                        foreach ($subgroups as $cycleSubgroup => $rows) {
+                            foreach ($rows as $row) {
+
+                                if ($departmentPrinted) {
+                                    $departmentNamePdf = '';
+                                } else {
+                                    $departmentNamePdf = $_NAGRUZKA_DEPARTMENTS[$departmentNumber];
+                                    $departmentPrinted = true;
+                                }
+
+                                if ($subjectPrinted) {
+                                    $subjectNamePdf = '';
+                                } else {
+                                    $subjectNamePdf = $subjectName;
+                                    $subjectPrinted = true;
+                                }
+
+                                if (0 == $cycleGroup) {
+                                    $cycleGroupPdf = '—';
+                                } else {
+                                    $cycleGroupPdf = 'группа ' . $cycleGroup;
+                                }
+
+                                if (0 == $cycleSubgroup) {
+                                    $cycleSubgroupPdf = '—';
+                                } else {
+                                    $cycleSubgroupPdf = 'п/г ' . $cycleSubgroup;
+                                }
+
+                                $type = $row[5];
+                                $hours = intval($row[6]);
+                                $prep = $row[7];
+
+                                $uniqueHours[] = $hours;
+
+                                if ($zebra) {
+                                    $style="background-color: #EEEEEE;";
+                                } else {
+                                    $style = '';
+                                }
+                                $zebra = !$zebra;
+                                $xhtml .= <<<EOT
+    <tr style="{$style}">
+        <td>{$departmentNamePdf}</td>
+        <td>{$subjectNamePdf}</td>
+        <td>{$cycleGroupPdf}</td>
+        <td>{$cycleSubgroupPdf}</td>
+        <td>{$type}</td>
+        <td>{$hours}</td>
+        <td>{$prep}</td>
+    </tr>
+EOT;
+
+//                                $PLANS_ID[$formName][$specName][$courseNumber][$departmentNumber][$subjectName];
+
+                                $cycleType = '';
+                                switch ($type) {
+                                    case 'Лек':
+                                        $cycleType = 'лек';
+                                        break;
+                                    case 'Пр':
+                                        $cycleType = 'пр';
+                                        break;
+                                    case 'Лаб':
+                                        $cycleType = 'лаб';
+                                        break;
+                                }
+
+                                if ('' != $row[8]) {
+                                    /**
+                                     * Добавляем объединение.
+                                     */
+                                    $codObjed = intval($row[8]);
+                                    $tipObjed = "'с/п'";
+                                } else {
+                                    $codObjed = 'null';
+                                    $tipObjed = 'null';
+                                }
+
+//                                $rasspass->debug = true;
+//                                var_dump($row);
+                                $query = <<<EOT
+INSERT INTO Циклы (КодКурса, КодОбъед, ТипЗан, Группа, Подгруппа, КодТипАуд, ТипОбъед)
+VALUES (
+    {$PLANS_ID[$formName][$specName][$courseNumber][$departmentNumber][$subjectName]},
+    {$codObjed}, '{$cycleType}', {$cycleGroup}, {$cycleSubgroup}, {$lecAud},
+    {$tipObjed}
+);
+EOT;
+                                $rasspass->Execute(u2w($query));
+//                                $rasspass->debug = false;
+
+                                /**
+                                 * Определяем номер вставленного цикла.
+                                 */
+                                $result = $rasspass->Execute(u2w(
+                                    'SELECT КодЦикла FROM Циклы ORDER BY КодЦикла DESC'
+                                ))->GetRows();
+                                $cycleId = intval($result[0][u2w('КодЦикла')]);
+
+                                /**
+                                 * Вставляем одним куском, как есть.
+                                 */
+                                $zanyatiy = ceil($hours / 2);
+                                $query = <<<EOT
+INSERT INTO Куски (КодЦикла, НК, КолПар, КолЗан, чн)
+VALUES (
+    {$cycleId}, 1, 1, {$zanyatiy}, False
+);
+EOT;
+                                $rasspass->Execute(u2w($query));
+
+                                /**
+                                 * Дублирующиеся лекции выводить не надо.
+                                 */
+                                if (0 == $cycleGroup && 0 == $cycleSubgroup) {
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            $xhtml .= <<<EOT
+</table>
+EOT;
+            $specsPdf->AddPage();
+            $specsPdf->writeHTML($xhtml);
+//            break;
+        }
+//        break;
+    }
+//    break;
+}
+
+$specsPdf->Output($envPath . u2w('ПланыПоПотокам.pdf'), 'F');
+
+// $uniqueHours = array_unique($uniqueHours);
+// var_dump($uniqueHours);
+
+die();
 
 /**
  * Печатаем учебные планы с физкультурой.
@@ -752,3 +1098,93 @@ $xhtml .= '</table>';
 $fuckedPdf->AddPage();
 $fuckedPdf->writeHTML($xhtml);
 $fuckedPdf->Output($envPath . 'fuckedPdf.pdf', 'F');
+
+/**
+ * Создаём файлы по кафедрам со списками незаполненных преподавателей.
+ */
+$emptyTeachers = array();
+foreach ($data as $row) {
+    $department = intval($row[11]);
+    if (!isset($emptyTeachers[$department])) {
+        $emptyTeachers[$department] = array();
+    }
+
+    $teacher = $row[7];
+    if (in_array($teacher, array('', 'почасовой фонд', 'Го+Мж+Ши',
+        'Решетникова, Артюшина', 'преп.2', 'Андреев, Карташева',
+        'вакансия', 'ассистент?', 'преп.1'))
+    ) {
+        $emptyTeachers[$department][] = $row;
+    }
+}
+
+$xhtml = <<<EOT
+<h1>Дисциплины без указания преподавателей (по кафедрам)</h1>
+EOT;
+
+foreach ($emptyTeachers as $departmentNumber => $rows) {
+    if (count($rows) <= 0) {
+        continue;
+    }
+
+    $rtf = new PHPRtfLite();
+    $font = new PHPRtfLite_Font();
+    $paragraph = new PHPRtfLite_ParFormat();
+    $section = $rtf->addSection();
+    $section->writeText(
+        "Незаполненные преподаватели по кафедре {$_NAGRUZKA_DEPARTMENTS[$departmentNumber]}",
+        $font,
+        $paragraph
+    );
+
+    $table = $section->addTable();
+    $table->addColumnsList(array(2, 3, 3, 3, 3));
+    $table->addRows(count($rows) + 1);
+    $table->getCell(1, 1)->writeText(
+        'Группа',
+        $font, $paragraph
+    );
+    $table->getCell(1, 2)->writeText(
+        'Дисциплина',
+        $font, $paragraph
+    );
+    $table->getCell(1, 3)->writeText(
+        'Тип занятий',
+        $font, $paragraph
+    );
+    $table->getCell(1, 4)->writeText(
+        'Часы',
+        $font, $paragraph
+    );
+    $table->getCell(1, 5)->writeText(
+        'Преподаватель',
+        $font, $paragraph
+    );
+
+    $i = 2;
+    foreach ($rows as $row) {
+        $table->getCell($i, 1)->writeText(
+            $row[2],
+            $font, $paragraph
+        );
+        $table->getCell($i, 2)->writeText(
+            $row[0],
+            $font, $paragraph
+        );
+        $table->getCell($i, 3)->writeText(
+            $row[5],
+            $font, $paragraph
+        );
+        $table->getCell($i, 4)->writeText(
+            $row[6],
+            $font, $paragraph
+        );
+
+        $i++;
+    }
+
+    $rtf->save(
+        $envPath . 'preps' . $slash
+            . u2w($_NAGRUZKA_DEPARTMENTS[$departmentNumber]) . '.rtf'
+    );
+}
