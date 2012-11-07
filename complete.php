@@ -574,7 +574,8 @@ foreach ($fuckedPlan as $row) {
 /**
  * Путь к базе данных РАСПАСС.
  */
-$RASSPASS = 'C:\\2012_2013 1\\Raspis1.mdb';
+//$RASSPASS = 'C:\\2012_2013 1\\Raspis1.mdb';
+$RASSPASS = 'C:\\2012_2013 2\\Raspis2.mdb';
 
 /**
  * @var ADOConnection $rasspass
@@ -686,7 +687,7 @@ INSERT INTO Потоки
     (ФормаОбучения, Спец, Курс, Групп, Студентов, Начало, Конец, КолРабочихДней)
 VALUES (
     '{$form}', '{$specName}', '{$course}', {$groupCount}, {$studentCount},
-    #09/01/2012#, #12/29/2012#, 5
+    #02/11/2012#, #06/08/2012#, 5
 )
 EOT;
             $rasspass->Execute(u2w($query));
